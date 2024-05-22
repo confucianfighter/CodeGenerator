@@ -1,0 +1,896 @@
+
+--------------------------------------------------
+.\assistant.py
+
+--------------------------------------------------
+from openai import OpenAI
+import openai
+from dotenv import load_dotenv
+import os
+from event_handler import EventHandler
+# load api key manually from .env file
+load_dotenv()
+key = os.getenv('OPENAI_API_KEY')
+openai.api_key = key
+client = OpenAI()
+
+
+thread = client.beta.threads.create()
+event_handler = EventHandler()
+def send_message(message, delta_callback=None):
+    message = client.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=message
+    )
+    if delta_callback:
+        event_handler.text_delta_callback=delta_callback
+    with client.beta.threads.runs.stream(
+        thread_id=thread.id,
+        assistant_id="asst_aIaIoyif1qLSCRKk6eSNf8rl",
+        instructions="Please address the user as Jane Doe. The user has a premium account.",
+        event_handler=event_handler,
+    ) as stream:
+        stream.until_done()
+
+def print_delta(delta):
+    print(delta.value, end="", flush=True)
+    
+if __name__ == "__main__":
+    send_message("Hello", delta_callback=print_delta)
+--------------------------------------------------
+.\chat_bubble_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtCore import Qt
+
+class ChatBubblePane(QWidget):
+    def __init__(self, sender, message, parent=None):
+        super().__init__(parent)
+        
+        self.layout = QVBoxLayout()
+        
+        self.bubble_label = QLabel(message)
+        self.bubble_label.setWordWrap(True)
+        self.bubble_label.setAlignment(Qt.AlignLeft if sender == "You" else Qt.AlignRight)
+        
+        if sender == "You":
+            self.bubble_label.setStyleSheet("background-color: lightblue; padding: 10px; border-radius: 10px;")
+        else:
+            self.bubble_label.setStyleSheet("background-color: lightgreen; padding: 10px; border-radius: 10px;")
+        
+        self.layout.addWidget(self.bubble_label)
+        self.setLayout(self.layout)
+
+--------------------------------------------------
+.\chat_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout
+
+from chat_thread_pane import ChatThreadPane
+from message_input_pane import MessageInputPane
+from code_action_pane import CodeActionPane
+
+class ChatPane(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.layout = QVBoxLayout()
+
+        self.chat_thread_pane = ChatThreadPane(self)
+        self.message_input_pane = MessageInputPane(self)
+        self.code_action_pane = CodeActionPane(self.confirm_action, self.deny_action, self)
+
+        self.layout.addWidget(self.chat_thread_pane)
+        self.layout.addWidget(self.message_input_pane)
+        self.layout.addWidget(self.code_action_pane)
+        self.setLayout(self.layout)
+
+    def add_message_to_thread(self, sender, message):
+        self.chat_thread_pane.add_message_to_thread(sender, message)
+
+    def confirm_action(self, action_id):
+        print(f"Action {action_id} confirmed.")
+        # Add code to handle the confirmation of the action
+
+    def deny_action(self, action_id):
+        print(f"Action {action_id} denied.")
+        # Add code to handle the denial of the action
+
+--------------------------------------------------
+.\chat_thread_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea
+
+from chat_bubble_pane import ChatBubblePane
+
+class ChatThreadPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.layout = QVBoxLayout()
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.chat_thread = QWidget()
+        self.chat_thread_layout = QVBoxLayout()
+        self.chat_thread.setLayout(self.chat_thread_layout)
+        self.scroll_area.setWidget(self.chat_thread)
+
+        self.layout.addWidget(self.scroll_area)
+        self.setLayout(self.layout)
+
+    def add_message_to_thread(self, sender, message):
+        bubble = ChatBubblePane(sender, message, self)
+        self.chat_thread_layout.addWidget(bubble)
+        self.chat_thread_layout.addStretch(1)
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+
+--------------------------------------------------
+.\code_action_item_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+
+class CodeActionItemPane(QWidget):
+    def __init__(self, description, action_id, confirm_callback, deny_callback, parent=None):
+        super().__init__(parent)
+        self.action_id = action_id
+        self.parent = parent
+        self.confirm_callback = confirm_callback
+        self.deny_callback = deny_callback
+
+        self.layout = QHBoxLayout()
+
+        self.action_label = QLabel(description)
+        self.action_label.setWordWrap(True)
+        self.action_label.setStyleSheet("background-color: lightyellow; padding: 10px; border-radius: 10px;")
+
+        self.confirm_button = QPushButton("✔")
+        self.confirm_button.setStyleSheet("background-color: green; color: white;")
+        self.confirm_button.clicked.connect(self.confirm_action)
+
+        self.deny_button = QPushButton("✖")
+        self.deny_button.setStyleSheet("background-color: orange; color: white;")
+        self.deny_button.clicked.connect(self.deny_action)
+
+        self.layout.addWidget(self.action_label)
+        self.layout.addWidget(self.confirm_button)
+        self.layout.addWidget(self.deny_button)
+        self.setLayout(self.layout)
+
+    def confirm_action(self):
+        self.confirm_callback(self.action_id)
+        self.parent.remove_action(self)
+
+    def deny_action(self):
+        self.deny_callback(self.action_id)
+        self.parent.remove_action(self)
+
+--------------------------------------------------
+.\code_action_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea
+
+from code_action_item_pane import CodeActionItemPane
+
+class CodeActionPane(QWidget):
+    def __init__(self, confirm_callback, deny_callback, parent=None):
+        super().__init__(parent)
+        self.confirm_callback = confirm_callback
+        self.deny_callback = deny_callback
+
+        self.layout = QVBoxLayout()
+
+        self.label = QLabel("Action Required")
+        self.layout.addWidget(self.label)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.actions_widget = QWidget()
+        self.actions_layout = QVBoxLayout()
+        self.actions_widget.setLayout(self.actions_layout)
+        self.scroll_area.setWidget(self.actions_widget)
+
+        self.layout.addWidget(self.scroll_area)
+        self.setLayout(self.layout)
+
+        self.populate_actions()
+
+    def populate_actions(self):
+        for i in range(20):
+            description = f"Do you want to execute action {i+1}?"
+            self.add_code_action(description, i+1)
+
+    def add_code_action(self, description, action_id):
+        action_item = CodeActionItemPane(description, action_id, self.confirm_callback, self.deny_callback, self)
+        self.actions_layout.addWidget(action_item)
+
+    def remove_action(self, action_item):
+        self.actions_layout.removeWidget(action_item)
+        action_item.deleteLater()
+
+--------------------------------------------------
+.\concatenate_files.py
+
+--------------------------------------------------
+import os
+import sys
+
+def concatenate_files(folder_path):
+    output_text = []
+    separator = "\n" + "-" * 50 + "\n"
+    
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith('.py'):
+                file_path = os.path.join(root, file)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                    output_text.append(separator)
+                    output_text.append(f"{file_path}\n{separator}")
+                    output_text.append(file_content)
+    
+    return "".join(output_text)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python concatenate_files.py <folder_path>")
+        sys.exit(1)
+    
+    folder_path = sys.argv[1]
+    if not os.path.isdir(folder_path):
+        print(f"Error: {folder_path} is not a valid directory.")
+        sys.exit(1)
+    
+    concatenated_text = concatenate_files(folder_path)
+    output_file = "concatenated_output.txt"
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(concatenated_text)
+    
+    print(f"All .py files have been concatenated into {output_file}")
+
+--------------------------------------------------
+.\crud_operations.py
+
+--------------------------------------------------
+import os
+
+class CRUDOperations:
+    ZWSP = '\u200B'  # Zero Width Space character
+
+    def __init__(self, base_path):
+        self.base_path = base_path
+
+    def add_folder(self, folder_name):
+        folder_path = os.path.join(self.base_path, folder_name)
+        try:
+            os.makedirs(folder_path)
+            print(f"Folder '{folder_path}' created successfully.")
+        except FileExistsError:
+            print(f"Folder '{folder_path}' already exists.")
+        except Exception as e:
+            print(f"Error creating folder '{folder_path}': {e}")
+
+    def remove_folder(self, folder_name):
+        folder_path = os.path.join(self.base_path, folder_name)
+        try:
+            os.rmdir(folder_path)
+            print(f"Folder '{folder_path}' removed successfully.")
+        except FileNotFoundError:
+            print(f"Folder '{folder_path}' not found.")
+        except Exception as e:
+            print(f"Error removing folder '{folder_path}': {e}")
+
+    def add_file(self, file_name):
+        file_path = os.path.join(self.base_path, file_name)
+        try:
+            with open(file_path, 'w') as file:
+                pass
+            print(f"File '{file_path}' created successfully.")
+        except Exception as e:
+            print(f"Error creating file '{file_path}': {e}")
+
+    def remove_file(self, file_name):
+        file_path = os.path.join(self.base_path, file_name)
+        try:
+            os.remove(file_path)
+            print(f"File '{file_path}' removed successfully.")
+        except FileNotFoundError:
+            print(f"File '{file_path}' not found.")
+        except Exception as e:
+            print(f"Error removing file '{file_path}': {e}")
+
+    def insert_at_line(self, file_name, line_number, content):
+        file_path = os.path.join(self.base_path, file_name)
+        try:
+            with open(file_path, 'r') as file:
+                lines = file.readlines()
+
+            lines.insert(line_number, content + '\n')
+
+            with open(file_path, 'w') as file:
+                file.writelines(lines)
+            print(f"Inserted content at line {line_number} in file '{file_path}'.")
+        except Exception as e:
+            print(f"Error inserting content at line {line_number} in file '{file_path}': {e}")
+
+    def remove_lines(self, file_name, start_line, end_line):
+        file_path = os.path.join(self.base_path, file_name)
+        try:
+            with open(file_path, 'r') as file:
+                lines = file.readlines()
+
+            del lines[start_line:end_line+1]
+
+            with open(file_path, 'w') as file:
+                file.writelines(lines)
+            print(f"Removed lines {start_line} to {end_line} from file '{file_path}'.")
+        except Exception as e:
+            print(f"Error removing lines {start_line} to {end_line} from file '{file_path}': {e}")
+
+    
+
+    
+
+# Testing the new methods
+def test_invisible_lines():
+    base_path = 'test_env'
+    if not os.path.exists(base_path):
+        os.makedirs(base_path)
+
+    crud = CRUDOperations(base_path)
+    file_name = 'test_file.txt'
+    
+    crud.add_file(file_name)
+    crud.insert_at_line(file_name, 0, 'Visible line 1')
+    crud.insert_at_line(file_name, 1, 'Visible line 2')
+    crud.insert_at_line(file_name, 2, 'Visible line 3')
+
+    # Mark the second line as invisible
+    crud.mark_line_invisible(file_name, 1)
+
+    # Read the file ignoring invisible lines
+    visible_lines = crud.read_file_ignoring_invisible_lines(file_name)
+    print("Visible lines:")
+    for line in visible_lines:
+        print(line.strip())
+
+if __name__ == "__main__":
+    test_invisible_lines()
+
+--------------------------------------------------
+.\event_handler.py
+
+--------------------------------------------------
+from typing_extensions import override
+from openai import AssistantEventHandler
+ 
+# First, we create a EventHandler class to define
+# how we want to handle the events in the response stream.
+ 
+class EventHandler(AssistantEventHandler): 
+    text_delta_callback = None
+    def __init__(self, text_delta_callback=None):
+        self.text_delta_callback = text_delta_callback
+        AssistantEventHandler.__init__(self)
+    @override
+    def on_text_created(self, text) -> None:
+        print(f"\nassistant > ", end="", flush=True)
+        
+    @override
+    def on_text_delta(self, delta, snapshot):
+        self.text_delta_callback(delta)
+            
+    def on_tool_call_created(self, tool_call):
+        print(f"\nassistant > {tool_call.type}\n", flush=True)
+
+    def on_tool_call_delta(self, delta, snapshot):
+        if delta.type == 'code_interpreter':
+            if delta.code_interpreter.input:
+                print(delta.code_interpreter.input, end="", flush=True)
+            if delta.code_interpreter.outputs:
+                print(f"\n\noutput >", flush=True)
+                for output in delta.code_interpreter.outputs:
+                    if output.type == "logs":
+                        print(f"\n{output.logs}", flush=True)
+
+    # Then, we use the `stream` SDK helper 
+    # with the `EventHandler` class to create the Run 
+    # and stream the response.
+--------------------------------------------------
+.\github_tab.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox
+from github import Github
+import os
+import subprocess
+from settings_util import add_main_setting, retrieve_main_setting, add_project_setting, retrieve_project_setting
+import re
+
+class GitHubTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root_project_folder = retrieve_main_setting("root_project_folder", "")
+        self.layout = QVBoxLayout()
+
+        # GitHub Access Token
+        self.token_label = QLabel("GitHub Access Token:")
+        self.token_input = QLineEdit()
+        self.token_input.setText(retrieve_main_setting('github_token', ''))
+        self.layout.addWidget(self.token_label)
+        self.layout.addWidget(self.token_input)
+
+        # GitHub Username
+        self.username_label = QLabel("GitHub Username:")
+        self.username_input = QLineEdit()
+        self.username_input.setText(retrieve_main_setting('github_username', ''))
+        self.layout.addWidget(self.username_label)
+        self.layout.addWidget(self.username_input)
+
+        # Repository Name
+        self.repo_name_label = QLabel("Repository Name:")
+        self.repo_name_input = QLineEdit()
+        self.repo_name_input.setText(retrieve_project_setting(root_project_folder, 'github_repo_name', ''))
+        self.layout.addWidget(self.repo_name_label)
+        self.layout.addWidget(self.repo_name_input)
+
+        # Repository Description
+        self.repo_desc_label = QLabel("Repository Description:")
+        self.repo_desc_input = QTextEdit()
+        self.repo_desc_input.setPlainText(retrieve_project_setting(root_project_folder, 'github_repo_desc', ''))
+        self.layout.addWidget(self.repo_desc_label)
+        self.layout.addWidget(self.repo_desc_input)
+
+        # Commit Message
+        self.commit_message_label = QLabel("Commit Message:")
+        self.commit_message_input = QLineEdit()
+        self.commit_message_input.setText(retrieve_project_setting(root_project_folder, 'github_commit_message', ''))
+        self.layout.addWidget(self.commit_message_label)
+        self.layout.addWidget(self.commit_message_input)
+
+        # Create Repo Button
+        self.create_repo_button = QPushButton("Create Repository")
+        self.create_repo_button.clicked.connect(self.create_repo)
+        self.layout.addWidget(self.create_repo_button)
+
+        # Push Changes Button
+        self.push_button = QPushButton("Push Changes")
+        self.push_button.clicked.connect(self.push_changes)
+        self.layout.addWidget(self.push_button)
+
+        # Rewind Button
+        self.rewind_button = QPushButton("Rewind Changes")
+        self.rewind_button.clicked.connect(self.rewind_changes)
+        self.layout.addWidget(self.rewind_button)
+
+        self.setLayout(self.layout)
+
+    def sanitize_description(self, description):
+        # Remove all control characters and keep only printable ones
+        return re.sub(r'[\x00-\x1F\x7F]', '', description)
+
+    def validate_path(self, path):
+        # Check for valid Windows path
+        if not os.path.isabs(path):
+            return False
+        try:
+            os.listdir(path)
+            return True
+        except (OSError, IOError):
+            return False
+
+    def create_repo(self):
+        token = self.token_input.text()
+        username = self.username_input.text()
+        repo_name = self.repo_name_input.text()
+        repo_desc = self.repo_desc_input.toPlainText()
+        root_project_folder = retrieve_main_setting("root_project_folder", "")
+        print("Project root is" + root_project_folder)
+        if not self.validate_path(root_project_folder):
+            QMessageBox.critical(self, "Error", "Invalid project root directory." + root_project_folder)
+            return
+
+        # Save main settings
+        add_main_setting('github_token', token)
+        add_main_setting('github_username', username)
+
+        # Save project settings
+        add_project_setting(root_project_folder, 'github_repo_name', repo_name)
+        add_project_setting(root_project_folder, 'github_repo_desc', repo_desc)
+
+        repo_desc = self.sanitize_description(repo_desc)  # Sanitize the description
+
+        g = Github(token)
+        user = g.get_user()
+
+        try:
+            repo = user.create_repo(
+                name=repo_name,
+                description=repo_desc,
+                private=False  # Change to True if you want to create a private repository
+            )
+            # Initialize the repo with a README file
+            repo.create_file("README.md", "Initial commit", f"# {repo_name}\n\n{repo_desc}")
+            QMessageBox.information(self, "Success", f"Repository '{repo_name}' created successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error creating repository: {e}")
+
+        # Initialize local repository
+        self.initialize_local_repo(repo_name, root_project_folder)
+
+    def initialize_local_repo(self, repo_name, root_project_folder):
+        try:
+            
+            ### Run these commands: echo "# CodeGenerator" >> README.md
+# git init
+# git add README.md
+# git commit -m "first commit"
+# git branch -M main
+# git remote add origin https://github.com/confucianfighter/CodeGenerator.git
+# git push -u origin main
+
+            os.chdir(root_project_folder)
+            with open('README.md', 'w') as f:
+                f.write(f"# {repo_name}\n\n")
+            subprocess.run(['git', 'init'], check=True)
+            # add .gitignore with .env and settings.json as well as __cache__ and __pycache__
+            # create .gitignore file
+            #subprocess.run(['echo', '.env\nsettings.json\n__cache__\n__pycache__', '>>', '.gitignore'], check=True)
+            with open('.gitignore', 'w') as f:
+                f.write('.env\nsettings.json\n__cache__\n__pycache__\n')
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', 'first commit'], check=True)
+            subprocess.run(['git', 'branch', '-M', 'main'], check=True)
+            subprocess.run(['git', 'push', '-u', 'origin', 'main'], check=True)
+            
+            QMessageBox.information(self, "Success", "Local repository initialized and pushed to GitHub.")
+        except subprocess.CalledProcessError as e:
+            QMessageBox.critical(self, "Error", f"Error initializing local repository: {e}")
+
+    def push_changes(self):
+        commit_message = self.commit_message_input.text()
+
+        token = self.token_input.text()
+        username = self.username_input.text()
+        repo_name = self.repo_name_input.text()
+        root_project_folder = retrieve_main_setting("root_project_folder", "")
+
+        if not self.validate_path(root_project_folder):
+            QMessageBox.critical(self, "Error", "Invalid project root directory.")
+            return
+
+        g = Github(token)
+        user = g.get_user()
+        repo = user.get_repo(repo_name)
+
+        try:
+            os.chdir(root_project_folder)  # Change directory to project root
+            subprocess.run(['git', 'add', '.'], check=True)
+            subprocess.run(['git', 'commit', '-m', commit_message], check=True)
+            subprocess.run(['git', 'push'], check=True)
+            QMessageBox.information(self, "Success", "Changes pushed to GitHub.")
+        except subprocess.CalledProcessError as e:
+            QMessageBox.critical(self, "Error", f"Error pushing changes: {e}")
+
+    def rewind_changes(self):
+        token = self.token_input.text()
+        repo_name = self.repo_name_input.text()
+        root_project_folder = retrieve_main_setting("root_project_folder", "")
+
+        if not self.validate_path(root_project_folder):
+            QMessageBox.critical(self, "Error", "Invalid project root directory.")
+            return
+
+        g = Github(token)
+        user = g.get_user()
+        repo = user.get_repo(repo_name)
+
+        try:
+            commits = repo.get_commits()
+            if commits.totalCount > 1:
+                last_commit_sha = commits[1].sha
+                os.chdir(root_project_folder)  # Change directory to project root
+                subprocess.run(['git', 'reset', '--hard', last_commit_sha], check=True)
+                subprocess.run(['git', 'push', '--force'], check=True)
+                QMessageBox.information(self, "Success", "Rewind to the previous commit successful.")
+            else:
+                QMessageBox.warning(self, "Warning", "No previous commit to rewind to.")
+        except subprocess.CalledProcessError as e:
+            QMessageBox.critical(self, "Error", f"Error rewinding changes: {e}")
+
+--------------------------------------------------
+.\main.py
+
+--------------------------------------------------
+import sys
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget
+from settings_tab import SettingsTab
+from main_tab import MainTab
+from github_tab import GitHubTab
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("PyQt5 Tabbed Interface")
+        self.setGeometry(100, 100, 800, 600)
+
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        self.settings_tab = SettingsTab()
+        self.tabs.addTab(self.settings_tab, "Settings")
+        self.main_tab = MainTab()
+        self.tabs.addTab(self.main_tab, "Main")
+        self.github_tab = GitHubTab()
+        self.tabs.addTab(self.github_tab, "GitHub")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    mainWin = MainWindow()
+    mainWin.show()
+    sys.exit(app.exec_())
+
+--------------------------------------------------
+.\main_tab.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from chat_pane import ChatPane
+
+class MainTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        
+        self.layout = QVBoxLayout()
+        
+        self.chat_pane = ChatPane()
+        
+        self.layout.addWidget(self.chat_pane)
+        
+        self.setLayout(self.layout)
+
+--------------------------------------------------
+.\message_input_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QPushButton
+from PyQt5.QtCore import Qt, QEvent
+
+class MessageInputPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.layout = QVBoxLayout()
+
+        self.input_box = QTextEdit()
+        self.input_box.setPlaceholderText("Type your message here...")
+        self.input_box.setFixedHeight(100)
+        self.input_box.installEventFilter(self)
+
+        self.send_button = QPushButton("Send")
+        self.send_button.clicked.connect(self.send_message)
+
+        self.layout.addWidget(self.input_box)
+        self.layout.addWidget(self.send_button)
+        self.setLayout(self.layout)
+
+    def eventFilter(self, obj, event):
+        if obj == self.input_box and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Return and event.modifiers() == Qt.ShiftModifier:
+            self.send_message()
+            return True
+        return super().eventFilter(obj, event)
+
+    def send_message(self):
+        message = self.input_box.toPlainText().strip()
+        if message:
+            self.parent().add_message_to_thread("You", message)
+            self.input_box.clear()
+            # Here you would normally send the message to the backend or API
+            # For now, we'll just echo the message back
+            self.parent().add_message_to_thread("Bot", message)
+
+--------------------------------------------------
+.\project_description_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLabel
+from settings_util import retrieve_project_setting, add_project_setting, retrieve_main_setting
+
+class ProjectDescriptionPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+
+        self.layout = QVBoxLayout()
+
+        self.label = QLabel("Project Description:")
+        self.description_box = QTextEdit()
+        self.description_box.textChanged.connect(self.save_description)
+
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.description_box)
+        self.setLayout(self.layout)
+
+        self.load_project_settings()
+
+    def save_description(self):
+        project_root = retrieve_main_setting("root_project_folder", "")
+        if project_root:
+            add_project_setting(project_root, "project_description", self.description_box.toPlainText())
+
+    def load_project_settings(self):
+        project_root = retrieve_main_setting("root_project_folder", "")
+        description = retrieve_project_setting(project_root, "project_description", "")
+        self.description_box.setText(description)
+
+--------------------------------------------------
+.\project_root_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox
+from settings_util import add_main_setting, retrieve_main_setting, save_main_settings, load_main_settings
+import os
+
+class ProjectRootPane(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+
+        self.layout = QVBoxLayout()
+
+        # Create a vertical layout for the file picker
+        self.file_picker_layout = QVBoxLayout()
+        self.file_path_label = QLabel()
+        self.file_picker_button = QPushButton("Change")
+        self.file_picker_button.clicked.connect(self.open_file_picker)
+        self.file_picker_layout.addWidget(self.file_path_label)
+        self.file_picker_layout.addWidget(self.file_picker_button)
+
+        self.layout.addLayout(self.file_picker_layout)
+        self.layout.addStretch(1)
+        self.setLayout(self.layout)
+
+        self.update_file_path_label()
+
+    def open_file_picker(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Root Project Folder")
+        if folder:
+            self.check_and_create_project_folder(folder)
+            add_main_setting("root_project_folder", folder)
+            self.update_file_path_label()
+            print(f"Selected folder: {folder}")
+
+    def check_and_create_project_folder(self, folder):
+        code_generator_path = os.path.join(folder, "CodeGenerator")
+        if not os.path.exists(code_generator_path):
+            reply = QMessageBox.question(self, "Create Folder",
+                                         f"The folder 'CodeGenerator' does not exist in {folder}. Would you like to create it?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                os.makedirs(code_generator_path)
+                QMessageBox.information(self, "Folder Created",
+                                        f"The folder 'CodeGenerator' has been created in {folder}.")
+                save_main_settings(load_main_settings())
+            else:
+                QMessageBox.warning(self, "Folder Not Created",
+                                    "The 'CodeGenerator' folder was not created. Please select another folder or create the folder manually.")
+
+    def update_file_path_label(self):
+        folder = retrieve_main_setting("root_project_folder", "")
+        self.file_path_label.setText(folder)
+
+--------------------------------------------------
+.\settings_pane.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout
+
+from project_root_pane import ProjectRootPane
+from project_description_pane import ProjectDescriptionPane
+
+class SettingsPane(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.layout = QVBoxLayout()
+
+        self.project_root_pane = ProjectRootPane(self)
+        self.project_description_pane = ProjectDescriptionPane(self)
+
+        self.layout.addWidget(self.project_root_pane)
+        self.layout.addWidget(self.project_description_pane)
+
+        self.setLayout(self.layout)
+
+        self.project_root_pane.update_file_path_label()
+        self.project_description_pane.load_project_settings()
+
+--------------------------------------------------
+.\settings_tab.py
+
+--------------------------------------------------
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QScrollArea
+from settings_pane import SettingsPane
+
+class SettingsTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        
+        self.layout = QVBoxLayout()
+        
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        
+        self.settings_pane = SettingsPane()
+        self.scroll_area.setWidget(self.settings_pane)
+        
+        self.layout.addWidget(self.scroll_area)
+        
+        self.setLayout(self.layout)
+
+--------------------------------------------------
+.\settings_util.py
+
+--------------------------------------------------
+import json
+import os
+
+MAIN_SETTINGS_FILE = "settings.json"
+
+def load_main_settings():
+    if os.path.exists(MAIN_SETTINGS_FILE):
+        with open(MAIN_SETTINGS_FILE, 'r') as file:
+            settings = json.load(file)
+    else:
+        settings = {}
+    return settings
+
+def save_main_settings(settings):
+    with open(MAIN_SETTINGS_FILE, 'w') as file:
+        json.dump(settings, file, indent=4)
+
+def add_main_setting(key, value):
+    settings = load_main_settings()
+    settings[key] = value
+    save_main_settings(settings)
+
+def retrieve_main_setting(key, default_value=None):
+    settings = load_main_settings()
+    return settings.get(key, default_value)
+
+def get_project_settings_file(project_root):
+    return os.path.join(project_root, "CodeGenerator", "project_settings.json")
+
+def load_project_settings(project_root):
+    settings_file = get_project_settings_file(project_root)
+    if os.path.exists(settings_file):
+        with open(settings_file, 'r') as file:
+            settings = json.load(file)
+    else:
+        settings = {}
+    return settings
+
+def save_project_settings(project_root, settings):
+    settings_dir = os.path.join(project_root, "CodeGenerator")
+    if not os.path.exists(settings_dir):
+        os.makedirs(settings_dir)
+    settings_file = get_project_settings_file(project_root)
+    with open(settings_file, 'w') as file:
+        json.dump(settings, file, indent=4)
+
+def add_project_setting(project_root, key, value):
+    settings = load_project_settings(project_root)
+    settings[key] = value
+    save_project_settings(project_root, settings)
+
+def retrieve_project_setting(project_root, key, default_value=None):
+    settings = load_project_settings(project_root)
+    return settings.get(key, default_value)

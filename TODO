@@ -1,0 +1,13 @@
+1. Get basic chat streaming working.
+2. See if suggested actions can be inlined or if it's too buggy. 
+3. If it's too buggy, time to create tools.
+
+Inlined actions:
+
+- add to project description
+- create file
+- delete file
+- insert text
+- delete text
+- create folder
+- delete folder
